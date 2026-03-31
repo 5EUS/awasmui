@@ -1,122 +1,164 @@
 import 'package:flutter/material.dart';
+import 'package:awasmui/rust/generated/api.dart' as api;
+import 'package:awasmui/rust/generated/frb_generated.dart' as frb;
+import 'dart:async';
+
+/// Any page can call `await HandleStore.instance.handle` to get the same initialized handle.
+class HandleStore {
+  HandleStore._();
+  static final HandleStore instance = HandleStore._();
+
+  api.Handle? _handle;
+  Future<api.Handle>? _handleFuture;
+  Future<void>? _initFuture;
+
+  Future<void> _ensureInitialized() {
+    if (_initFuture != null) return _initFuture!;
+    // Call the generated init on the dart side. Await it once.
+    _initFuture = frb.RustLib.init().catchError((e) {
+      // Reset on error so callers can retry
+      _initFuture = null;
+      throw e;
+    });
+    return _initFuture!;
+  }
+
+  Future<api.Handle> get handle {
+    if (_handle != null) return Future.value(_handle!);
+    if (_handleFuture != null) return _handleFuture!;
+
+    // Ensure FRB runtime initialized, then create the handle.
+    _handleFuture = _ensureInitialized()
+        .then((_) => api.newHandle())
+        .then((h) {
+          _handle = h;
+          _handleFuture = null;
+          return h;
+        })
+        .catchError((e) {
+          _handleFuture = null;
+          throw e;
+        });
+    return _handleFuture!;
+  }
+
+  /// Optional: allow manual reset for tests/dev
+  void reset() {
+    _handle = null;
+    _handleFuture = null;
+    _initFuture = null;
+  }
+}
 
 void main() {
   runApp(const MyApp());
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
-  // This widget is the root of your application.
+  @override
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> {
+  late final Future<api.Handle> _handleFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start initializing the handle immediately on app start.
+    _handleFuture = HandleStore.instance.handle;
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
+      title: 'aWASM Demo',
       theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
       ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      // Wait for the handle once at top-level so home page / routes can assume initialization
+      home: FutureBuilder<api.Handle>(
+        future: _handleFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            // Simple splash while handle is created
+            return const Scaffold(
+              body: Center(child: CircularProgressIndicator()),
+            );
+          } else if (snapshot.hasError) {
+            return Scaffold(
+              body: Center(child: Text('Failed to init handle: ${snapshot.error}')),
+            );
+          } else {
+            final handle = snapshot.data!;
+            // Pass the ready handle into the home page (you can also rely on HandleStore from other pages)
+            return MyHomePage(title: 'aWASM Demo', handle: handle);
+          }
+        },
+      ),
     );
   }
 }
 
 class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
+  const MyHomePage({super.key, required this.title, required this.handle});
   final String title;
+  final api.Handle handle;
 
   @override
   State<MyHomePage> createState() => _MyHomePageState();
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  String _result = 'None';
+  bool _loading = false;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  // Example: call an async method on the handle and update state.
+  // Replace `doSomethingAsync` with a real method from your Handle.
+  Future<void> _callHandleExample() async {
+    setState(() => _loading = true);
+    try {
+      // Example placeholder - replace with your actual API call:
+      // final res = await widget.handle.someAsyncMethod('Naruto');
+      // setState(() => _result = res.toString());
+      await Future.delayed(const Duration(milliseconds: 200)); // placeholder
+      setState(() => _result = 'example result');
+    } catch (e) {
+      setState(() => _result = 'error: $e');
+    } finally {
+      setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
     return Scaffold(
       appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
         title: Text(widget.title),
       ),
       body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
         child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
+            const Text('Result for \'Naruto\''),
+            if (_loading) const CircularProgressIndicator(),
+            Text(_result, style: Theme.of(context).textTheme.headlineMedium),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: _callHandleExample,
+              child: const Text('Call Handle'),
             ),
+            const SizedBox(height: 8),
+            // ElevatedButton(
+            //   onPressed: _openOtherPage,
+            //   child: const Text('Open other page'),
+            // ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }

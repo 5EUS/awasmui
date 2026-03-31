@@ -43,3 +43,16 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# FRB stuff
+lib/rust/target
+lib/rust/generated
+lib/rust/src/frb_generated.rs
+lib/rust/Cargo.lock
+
+# Apple platforms
+build_tool/cargokit
+macos/Runner/Frameworks
+macos/Podfile.lock
+ios/Runner/Frameworks
+ios/Podfile.lock
